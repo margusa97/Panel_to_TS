@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Nov  8 14:05:17 2018
+
+@author: Marco
+"""
+import pandas as pd
+import numpy as np
+import os 
+
+def transform(x):
+    return str(x.date())
+
+class ReadWrite:
+    
+    def __init__(self, file, stock = None):
+            if not isinstance(file, str):
+                raise Exception('The file is not a string')
+            self.file = file
+            self.stock = stock
+            self.items = np.array(['Trade', 'Turnover', 'Volume', 'Trades', 'Av.Value', 'Av.Size', 'Share', 'VWAP'])
+            
+            self.df = pd.read_excel(self.file, self.stock)
+            self.markets_cells = []
+            
+    def get_range_values(self, c, item, market):
+        mask_nan = pd.notna(self.df[self.df.columns[c]])
+        col = self.df[self.df.columns[c]][mask_nan]
+        nc = np.argwhere(self.items == item)[0][0] + 2 + c
+        ind = np.argwhere(col == market)[0][0]
+        indices = np.squeeze(np.argwhere(col != ' '))
+        nex = indices[np.argwhere(indices == ind)[0][0]
+        + 1]
+        return self.df[self.df.columns[nc]][:nex]
+            
+    def check_presence(self,c, market):
+        df = self.df
+        mask_nan = pd.notna(df[df.columns[c]])
+        col = df[df.columns[c]][mask_nan]
+        col = col[col!= ' '].values.tolist()
+        if market in col:
+            return True 
+        else:
+            return False
+            
+    def get_rows(self, c, market):
+        df = self.df
+        mask_nan = pd.notna(df[df.columns[c]])
+        col = df[df.columns[c]][mask_nan]
+        ind = np.argwhere(col == market)[0][0]
+        indices = np.squeeze(np.argwhere(col != ' '))
+        nex = indices[np.argwhere(indices == ind)[0][0]
+        + 1]
+        prim_markets = df[df.columns[c+1]][:nex]
+        trade_markets = df[df.columns[c+2]][:nex]
+        
+        rows = np.squeeze(np.argwhere(prim_markets != ' '))
+        rows = rows[rows > ind]
+        if c == 0 and ind > 0:
+            prim_markets = df[df.columns[c+1]].values[ind+1:nex+1]
+            prim_markets = prim_markets[prim_markets != ' ']
+            
+            trade_markets = df[df.columns[c+2]].values[ind+1:nex+1]
+            trade_markets = trade_markets[trade_markets != ' ']
+
+        if c > 0 and ind > 0:
+            prim_markets = df[df.columns[c+1]].values[ind+1:nex+1]
+            prim_markets = prim_markets[prim_markets != ' ']
+            
+            trade_markets = df[df.columns[c+2]].values[ind+1:nex+1]
+            trade_markets = trade_markets[trade_markets != ' ']
+            
+            
+        if c == 0 and ind == 0:
+            prim_markets = df[df.columns[c+1]].values[:nex]
+            prim_markets = prim_markets[prim_markets != ' ']
+
+            trade_markets = df[df.columns[c+2]].values[:nex]
+            trade_markets = trade_markets[trade_markets != ' ']
+            
+        if c > 0 and ind == 0:
+            prim_markets = df[df.columns[c+1]].values[:nex]
+            prim_markets = prim_markets[prim_markets != ' ']
+            
+            trade_markets = df[df.columns[c+2]].values[:nex]
+            trade_markets = trade_markets[trade_markets != ' ']
+
+        rows_list = rows.tolist()
+        
+        prim_markets_list = prim_markets.tolist()
+        self.markets_cells.append(dict(zip(prim_markets_list, rows_list)))
+        return rows , prim_markets, nex, trade_markets
+
+
+
+    def build_first_block(self, mrkt, dates, c):
+            low_bound = min(self.get_rows(c, mrkt)[0])
+            up_bound = self.get_rows(c, mrkt)[2]
+            space = up_bound - low_bound
+            grid = np.zeros((space, len(dates)))
+            stock_col = np.expand_dims(np.array([self.stock for i in range(space)]), axis = 0).T
+            market_col = np.expand_dims(np.array([mrkt for i in range(space)]), axis = 0).T
+
+            initial_block = np.concatenate((stock_col, market_col,self.df[self.df.columns[c+1:c+3]][low_bound:up_bound].values), axis=1)
+            return initial_block, grid
+
+
+
+    def create_dictionary(self, initial_block):
+            mask = np.squeeze(np.argwhere(initial_block[:,2] != ' '))
+            prim_markets = initial_block[:,2][mask]
+            b = np.squeeze(np.argwhere(initial_block[:,2] != ' ')).tolist()
+            if type(prim_markets) != list:
+                if type(prim_markets) == np.ndarray:
+                    prim_markets = prim_markets.tolist()
+                else: 
+                    prim_markets = [prim_markets]
+            if type(b) != list:
+                b = [b]
+            assert type(prim_markets) == list and type(b) == list
+            dict_markets_range = dict(zip(prim_markets, b))
+            return dict_markets_range
+        
+    
+    def get_values_per_item(self, rows, item, c=0):
+        df = self.df
+        col = np.argwhere(self.items == item)[0][0] + 2 + c
+        n = len(rows)
+        values = []
+        for i in range(n):
+            ind = rows[i]
+            values.append(df[df.columns[col]][ind])
+        return values 
+        
+    
+    def put_values(self, d1, d2, grid, names, values,  j):
+        for i in range(len(names)):
+            ind_1 = d2[names[i]]
+            
+            if i == len(names)-1:
+                ind_2 = len(values)
+            else:
+                ind_2 = d2[names[i+1]]
+            diff = ind_2 - ind_1
+            
+            valori = values[ind_1:ind_2]
+            ind_3 = d1[names[i]]
+            grid[ind_3:ind_3 + diff, j] = valori
+        return grid
+    
+    def add_trade(self, news,  initial_block, mrkt, grid, dates):
+        for new in news:
+            aux = np.array([[self.stock, mrkt, ' ', new]])
+            initial_block = np.vstack((initial_block, aux))
+            aux_grid = np.zeros((1, len(dates)))
+            grid = np.vstack((grid, aux_grid))
+            
+        return initial_block, grid
+            
+
+        
+    def add_new_prim_market(self,c,news, initial_block, mrkt, primary_markets, dict_markets_range, grid, dates):
+                for div in news: 
+                        
+                        dic = dict(zip(self.get_rows(c, mrkt)[1].tolist(), self.get_rows(c, mrkt)[0].tolist()))
+
+                        row = dic[div]
+                        nex = np.argwhere(row == np.array(list(dic.values())))[0][0]
+                        bound_2 = self.get_rows(c, mrkt)[2]
+                        if nex +1== len(list(dic.values())):
+                            nexx = bound_2
+                        else:
+                            nexx = list(dic.values())[nex+1]
+                        new_block = self.df[self.df.columns[c+1:c+3]][row:nexx].as_matrix()
+                        aux_block = np.array([[self.stock, mrkt],[self.stock , mrkt]])
+                        while True:
+                            if aux_block.shape == new_block.shape:
+                                break
+                            aux_block = np.vstack((aux_block, np.array([[self.stock, mrkt]])))
+                        new = np.hstack((aux_block, new_block))
+                        initial_block = np.vstack((initial_block, new))
+                        primary_markets = np.append(primary_markets, div)
+                        max_row = max(dict_markets_range.values())
+                        dict_markets_range[div] = max_row + 1
+                        if initial_block.shape[0] != grid.shape[0]:
+                            aux = np.zeros((1, len(dates)))
+                            while True:
+                                grid = np.vstack((grid, aux))
+                                if  grid.shape[0] == initial_block.shape[0]:
+                                    break
+                        assert initial_block.shape[0] == grid.shape[0]
+                return initial_block, grid
+
